@@ -180,62 +180,327 @@ static const char *FRAGMENT_SHADER_SRC =
     "#version 330 core\n"
     "in vec2 fragCoord;\n"
     "out vec4 outColor;\n"
+    "\n"
     "uniform vec2 iResolution;\n"
     "uniform samplerBuffer iSpectrum;\n"
-    "uniform float iFundamental;\n"
-    "uniform float iFreqPerBin;\n"
     "uniform int iNumBins;\n"
-    "uniform float iComplexity;\n"
+    "uniform float iFreqPerBin;\n"
     "uniform float iMaxFreq;\n"
-    "uniform float iDominantHue;\n"
+    "uniform float iBaseFreq;\n"
+    "uniform float iModeScale;\n"
+    "uniform float iContrast;\n"
     "uniform int iColorMode;\n"
-    "uniform float iThreshold;\n"
+    "uniform float iTime;\n"
+    "uniform int iBoundary;\n"
+    "uniform int iAspectMode;\n"
     "\n"
     "#define PI 3.14159265\n"
+    "#define TAU 6.28318530\n"
     "\n"
-    "vec3 hsv2rgb(vec3 c) {\n"
-    "    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);\n"
-    "    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);\n"
-    "    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);\n"
+    "// ============================================================================\n"
+    "// COLORMAPS\n"
+    "// ============================================================================\n"
+    "\n"
+    "vec3 plasma(float t) {\n"
+    "    t = clamp(t, 0.0, 1.0);\n"
+    "    vec3 c0 = vec3(0.050383, 0.029803, 0.527975);\n"
+    "    vec3 c1 = vec3(0.417642, 0.000564, 0.658390);\n"
+    "    vec3 c2 = vec3(0.692840, 0.165141, 0.564522);\n"
+    "    vec3 c3 = vec3(0.881443, 0.392529, 0.383229);\n"
+    "    vec3 c4 = vec3(0.987622, 0.645320, 0.039886);\n"
+    "    vec3 c5 = vec3(0.940015, 0.975158, 0.131326);\n"
+    "    float s = t * 5.0;\n"
+    "    int idx = int(floor(s));\n"
+    "    float f = fract(s);\n"
+    "    if (idx == 0) return mix(c0, c1, f);\n"
+    "    if (idx == 1) return mix(c1, c2, f);\n"
+    "    if (idx == 2) return mix(c2, c3, f);\n"
+    "    if (idx == 3) return mix(c3, c4, f);\n"
+    "    return mix(c4, c5, f);\n"
     "}\n"
     "\n"
-    "float chladni(vec2 p, float n, float m, float a) {\n"
-    "    float kn = n * PI / a;\n"
-    "    float km = m * PI / a;\n"
-    "    return cos(kn * p.x) * cos(m * PI * p.y)\n"
-    "         - cos(km * p.x) * cos(n * PI * p.y);\n"
+    "vec3 magma(float t) {\n"
+    "    t = clamp(t, 0.0, 1.0);\n"
+    "    vec3 c0 = vec3(0.001462, 0.000466, 0.013866);\n"
+    "    vec3 c1 = vec3(0.316654, 0.071862, 0.485380);\n"
+    "    vec3 c2 = vec3(0.716387, 0.214982, 0.474720);\n"
+    "    vec3 c3 = vec3(0.974417, 0.462840, 0.359756);\n"
+    "    vec3 c4 = vec3(0.995131, 0.766837, 0.534094);\n"
+    "    vec3 c5 = vec3(0.987053, 0.991438, 0.749504);\n"
+    "    float s = t * 5.0;\n"
+    "    int idx = int(floor(s));\n"
+    "    float f = fract(s);\n"
+    "    if (idx == 0) return mix(c0, c1, f);\n"
+    "    if (idx == 1) return mix(c1, c2, f);\n"
+    "    if (idx == 2) return mix(c2, c3, f);\n"
+    "    if (idx == 3) return mix(c3, c4, f);\n"
+    "    return mix(c4, c5, f);\n"
     "}\n"
     "\n"
-    "vec2 freqToMode(float freq, float a) {\n"
-    "    float ratio = freq / iFundamental;\n"
-    "    float lambda_1_2 = 1.0 / (a * a) + 4.0;\n"
-    "    float target = lambda_1_2 * ratio * ratio;\n"
-    "    if (target <= lambda_1_2) return vec2(1.0, 2.0);\n"
-    "    float sqrtT = sqrt(target);\n"
-    "    float n = max(1.0, floor(sqrtT * a * iComplexity));\n"
-    "    float na = n / a;\n"
-    "    float m2 = target - na * na;\n"
-    "    float m = max(1.0, round(sqrt(max(0.0, m2))));\n"
-    "    if (m == n) m = n + 1.0;\n"
-    "    return vec2(n, m);\n"
+    "vec3 turbo(float t) {\n"
+    "    t = clamp(t, 0.0, 1.0);\n"
+    "    vec3 c0 = vec3(0.18995, 0.07176, 0.23217);\n"
+    "    vec3 c1 = vec3(0.25107, 0.25237, 0.63374);\n"
+    "    vec3 c2 = vec3(0.15992, 0.53830, 0.72889);\n"
+    "    vec3 c3 = vec3(0.09140, 0.74430, 0.54318);\n"
+    "    vec3 c4 = vec3(0.52876, 0.85393, 0.21546);\n"
+    "    vec3 c5 = vec3(0.88092, 0.73551, 0.07741);\n"
+    "    vec3 c6 = vec3(0.97131, 0.45935, 0.05765);\n"
+    "    vec3 c7 = vec3(0.84299, 0.15070, 0.15090);\n"
+    "    float s = t * 7.0;\n"
+    "    int idx = int(floor(s));\n"
+    "    float f = fract(s);\n"
+    "    if (idx == 0) return mix(c0, c1, f);\n"
+    "    if (idx == 1) return mix(c1, c2, f);\n"
+    "    if (idx == 2) return mix(c2, c3, f);\n"
+    "    if (idx == 3) return mix(c3, c4, f);\n"
+    "    if (idx == 4) return mix(c4, c5, f);\n"
+    "    if (idx == 5) return mix(c5, c6, f);\n"
+    "    return mix(c6, c7, f);\n"
     "}\n"
+    "\n"
+    "vec3 viridis(float t) {\n"
+    "    t = clamp(t, 0.0, 1.0);\n"
+    "    vec3 c0 = vec3(0.267004, 0.004874, 0.329415);\n"
+    "    vec3 c1 = vec3(0.282327, 0.140926, 0.457517);\n"
+    "    vec3 c2 = vec3(0.253935, 0.265254, 0.529983);\n"
+    "    vec3 c3 = vec3(0.206756, 0.371758, 0.553117);\n"
+    "    vec3 c4 = vec3(0.143936, 0.522773, 0.556295);\n"
+    "    vec3 c5 = vec3(0.119512, 0.607464, 0.540218);\n"
+    "    vec3 c6 = vec3(0.166383, 0.690856, 0.496502);\n"
+    "    vec3 c7 = vec3(0.319809, 0.770914, 0.411152);\n"
+    "    vec3 c8 = vec3(0.525776, 0.833491, 0.288127);\n"
+    "    vec3 c9 = vec3(0.762373, 0.876424, 0.137064);\n"
+    "    vec3 c10 = vec3(0.993248, 0.906157, 0.143936);\n"
+    "    float s = t * 10.0;\n"
+    "    int idx = int(floor(s));\n"
+    "    float f = fract(s);\n"
+    "    if (idx == 0) return mix(c0, c1, f);\n"
+    "    if (idx == 1) return mix(c1, c2, f);\n"
+    "    if (idx == 2) return mix(c2, c3, f);\n"
+    "    if (idx == 3) return mix(c3, c4, f);\n"
+    "    if (idx == 4) return mix(c4, c5, f);\n"
+    "    if (idx == 5) return mix(c5, c6, f);\n"
+    "    if (idx == 6) return mix(c6, c7, f);\n"
+    "    if (idx == 7) return mix(c7, c8, f);\n"
+    "    if (idx == 8) return mix(c8, c9, f);\n"
+    "    return mix(c9, c10, f);\n"
+    "}\n"
+    "\n"
+    "vec3 diverging(float t) {\n"
+    "    t = clamp(t, -1.0, 1.0);\n"
+    "    vec3 cold = vec3(0.085, 0.180, 0.525);\n"
+    "    vec3 cool = vec3(0.350, 0.550, 0.850);\n"
+    "    vec3 neutral = vec3(0.970, 0.970, 0.970);\n"
+    "    vec3 warm = vec3(0.900, 0.450, 0.350);\n"
+    "    vec3 hot = vec3(0.600, 0.050, 0.100);\n"
+    "    if (t < -0.5) return mix(cold, cool, (t + 1.0) * 2.0);\n"
+    "    if (t < 0.0) return mix(cool, neutral, (t + 0.5) * 2.0);\n"
+    "    if (t < 0.5) return mix(neutral, warm, t * 2.0);\n"
+    "    return mix(warm, hot, (t - 0.5) * 2.0);\n"
+    "}\n"
+    "\n"
+    "// ============================================================================\n"
+    "// PLATE EIGENMODES\n"
+    "// ============================================================================\n"
+    "\n"
+    "float beamCC(float x, float n) {\n"
+    "    float k = (n + 0.5) * PI;\n"
+    "    float s = sin(k * x);\n"
+    "    float edge = 1.0 - exp(-3.0 * min(x + 1.0, 1.0 - x));\n"
+    "    return s * edge;\n"
+    "}\n"
+    "\n"
+    "float beamFF(float x, float n) {\n"
+    "    return cos(n * PI * x);\n"
+    "}\n"
+    "\n"
+    "float beamCF(float x, float n) {\n"
+    "    float k = (n + 0.25) * PI;\n"
+    "    float xNorm = (x + 1.0) * 0.5;\n"
+    "    return sin(k * xNorm) - sinh(k * xNorm) * exp(-k);\n"
+    "}\n"
+    "\n"
+    "float modeSimplySupported(vec2 p, float n, float m, float aspect) {\n"
+    "    float qx = (p.x / aspect + 1.0) * 0.5;\n"
+    "    float qy = (p.y + 1.0) * 0.5;\n"
+    "    return sin(n * PI * qx) * sin(m * PI * qy);\n"
+    "}\n"
+    "\n"
+    "float modeClamped(vec2 p, float n, float m, float aspect) {\n"
+    "    float px = p.x / aspect;\n"
+    "    return beamCC(px, n) * beamCC(p.y, m);\n"
+    "}\n"
+    "\n"
+    "float modeFree(vec2 p, float n, float m, float aspect) {\n"
+    "    float px = p.x / aspect;\n"
+    "    float xMode = (n < 0.5) ? 1.0 : beamFF(px, n);\n"
+    "    float yMode = (m < 0.5) ? 1.0 : beamFF(p.y, m);\n"
+    "    return xMode * yMode;\n"
+    "}\n"
+    "\n"
+    "float modeSSF(vec2 p, float n, float m, float aspect) {\n"
+    "    float px = p.x / aspect;\n"
+    "    float qx = (px + 1.0) * 0.5;\n"
+    "    float xMode = sin(n * PI * qx);\n"
+    "    float yMode = (m < 0.5) ? 1.0 : cos(m * PI * p.y);\n"
+    "    return xMode * yMode;\n"
+    "}\n"
+    "\n"
+    "float modeCSS(vec2 p, float n, float m, float aspect) {\n"
+    "    float px = p.x / aspect;\n"
+    "    float qy = (p.y + 1.0) * 0.5;\n"
+    "    return beamCC(px, n) * sin(m * PI * qy);\n"
+    "}\n"
+    "\n"
+    "float modeCF(vec2 p, float n, float m, float aspect) {\n"
+    "    float px = p.x / aspect;\n"
+    "    float xMode = beamCC(px, n);\n"
+    "    float yMode = (m < 0.5) ? 1.0 : beamFF(p.y, m);\n"
+    "    return xMode * yMode;\n"
+    "}\n"
+    "\n"
+    "float modeCantilever(vec2 p, float n, float m, float aspect) {\n"
+    "    float px = p.x / aspect;\n"
+    "    float xMode = beamCF(px, n);\n"
+    "    float yMode = (m < 0.5) ? 1.0 : beamFF(p.y, m);\n"
+    "    return xMode * yMode;\n"
+    "}\n"
+    "\n"
+    "float modeGuided(vec2 p, float n, float m, float aspect) {\n"
+    "    float px = p.x / aspect;\n"
+    "    return cos(n * PI * px) * cos(m * PI * p.y);\n"
+    "}\n"
+    "\n"
+    "float modeChladni(vec2 p, float n, float m, float aspect) {\n"
+    "    float px = p.x / aspect;\n"
+    "    float py = p.y;\n"
+    "    float mode_nm = cos(n * PI * px) * cos(m * PI * py);\n"
+    "    float mode_mn = cos(m * PI * px) * cos(n * PI * py);\n"
+    "    return mode_nm - mode_mn;\n"
+    "}\n"
+    "\n"
+    "float computeSingleMode(vec2 p, float n, float m, float aspect, int boundary) {\n"
+    "    vec2 pc = p;\n"
+    "    if (boundary == 1 || boundary == 4 || boundary == 5 || boundary == 6) {\n"
+    "        pc.x = clamp(p.x, -aspect, aspect);\n"
+    "        pc.y = clamp(p.y, -1.0, 1.0);\n"
+    "    }\n"
+    "    if (boundary == 0) return modeSimplySupported(p, n, m, aspect);\n"
+    "    else if (boundary == 1) return modeClamped(pc, n, m, aspect);\n"
+    "    else if (boundary == 2) return modeFree(p, n, m, aspect);\n"
+    "    else if (boundary == 3) return modeSSF(p, n, m, aspect);\n"
+    "    else if (boundary == 4) return modeCSS(pc, n, m, aspect);\n"
+    "    else if (boundary == 5) return modeCF(pc, n, m, aspect);\n"
+    "    else if (boundary == 6) return modeCantilever(pc, n, m, aspect);\n"
+    "    else return modeGuided(p, n, m, aspect);\n"
+    "}\n"
+    "\n"
+    "float computeModeSum(vec2 p, float targetLambda, float aspect, int boundary, float time) {\n"
+    "    float sqrtL = sqrt(max(5.0, targetLambda));\n"
+    "    float n = max(2.0, floor(sqrtL * 0.9 + 0.5));\n"
+    "    float m = max(1.0, floor(sqrtL * 0.5 + 0.5));\n"
+    "    if (n <= m) n = m + 1.0;\n"
+    "    if (boundary == 0) return modeChladni(p, n, m, aspect);\n"
+    "    else return computeSingleMode(p, n, m, aspect, boundary);\n"
+    "}\n"
+    "\n"
+    "// ============================================================================\n"
+    "// MAIN\n"
+    "// ============================================================================\n"
     "\n"
     "void main() {\n"
-    "    float aspect = iResolution.x / iResolution.y;\n"
-    "    vec2 plate = (fragCoord - 0.5 * iResolution.xy) / (0.5 * iResolution.y);\n"
-    "    float displacement = 0.0;\n"
-    "    int maxBin = min(iNumBins, int(iMaxFreq / iFreqPerBin));\n"
-    "    for (int i = 1; i < maxBin; i++) {\n"
-    "        float amp = texelFetch(iSpectrum, i).r;\n"
-    "        float freq = float(i) * iFreqPerBin;\n"
-    "        vec2 nm = freqToMode(freq, aspect);\n"
-    "        displacement += amp * chladni(plate, nm.x, nm.y, aspect);\n"
+    "    vec2 uv = fragCoord / iResolution;\n"
+    "    float windowAspect = iResolution.x / iResolution.y;\n"
+    "\n"
+    "    vec2 p;\n"
+    "    bool outOfBounds = false;\n"
+    "    float plateAspect = 1.0;\n"
+    "\n"
+    "    if (iAspectMode == 0) {\n"
+    "        plateAspect = windowAspect;\n"
+    "        p.x = (uv.x - 0.5) * 2.0 * windowAspect;\n"
+    "        p.y = (uv.y - 0.5) * 2.0;\n"
+    "    } else if (iAspectMode == 1) {\n"
+    "        plateAspect = 1.0;\n"
+    "        if (windowAspect > 1.0) {\n"
+    "            float plateWidth = 1.0 / windowAspect;\n"
+    "            float margin = (1.0 - plateWidth) / 2.0;\n"
+    "            if (uv.x < margin || uv.x > 1.0 - margin) {\n"
+    "                outOfBounds = true;\n"
+    "            } else {\n"
+    "                float localX = (uv.x - margin) / plateWidth;\n"
+    "                p.x = (localX - 0.5) * 2.0;\n"
+    "                p.y = (uv.y - 0.5) * 2.0;\n"
+    "            }\n"
+    "        } else {\n"
+    "            float plateHeight = windowAspect;\n"
+    "            float margin = (1.0 - plateHeight) / 2.0;\n"
+    "            if (uv.y < margin || uv.y > 1.0 - margin) {\n"
+    "                outOfBounds = true;\n"
+    "            } else {\n"
+    "                float localY = (uv.y - margin) / plateHeight;\n"
+    "                p.x = (uv.x - 0.5) * 2.0;\n"
+    "                p.y = (localY - 0.5) * 2.0;\n"
+    "            }\n"
+    "        }\n"
+    "    } else {\n"
+    "        plateAspect = 1.0;\n"
+    "        if (windowAspect > 1.0) {\n"
+    "            p.x = (uv.x - 0.5) * 2.0 * windowAspect;\n"
+    "            p.y = (uv.y - 0.5) * 2.0;\n"
+    "        } else {\n"
+    "            p.x = (uv.x - 0.5) * 2.0;\n"
+    "            p.y = (uv.y - 0.5) * 2.0 / windowAspect;\n"
+    "        }\n"
     "    }\n"
-    "    float d = abs(displacement);\n"
-    "    float fw = fwidth(displacement) * 1.5;\n"
-    "    float intensity = 1.0 - smoothstep(iThreshold - fw, iThreshold + fw, d);\n"
-    "    vec3 color = iColorMode == 0 ? hsv2rgb(vec3(iDominantHue, 0.85, 1.0)) : vec3(1.0);\n"
-    "    outColor = vec4(color * intensity, 1.0);\n"
+    "\n"
+    "    if (outOfBounds) {\n"
+    "        outColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "        return;\n"
+    "    }\n"
+    "\n"
+    "    float displacement = 0.0;\n"
+    "    float totalEnergy = 0.0;\n"
+    "    int maxBin = min(iNumBins, int(iMaxFreq / iFreqPerBin));\n"
+    "\n"
+    "    for (int i = 1; i < 2048; i++) {\n"
+    "        if (i >= maxBin) break;\n"
+    "        float freq = float(i) * iFreqPerBin;\n"
+    "        float amp = texelFetch(iSpectrum, i).r;\n"
+    "        if (amp < 0.005) continue;\n"
+    "        float ratio = freq / iBaseFreq;\n"
+    "        float targetLambda = 5.0 + ratio * iModeScale * 10.0;\n"
+    "        float mode = computeModeSum(p, targetLambda, plateAspect, iBoundary, iTime);\n"
+    "        displacement += amp * mode;\n"
+    "        totalEnergy += amp;\n"
+    "    }\n"
+    "\n"
+    "    if (totalEnergy > 0.1) {\n"
+    "        displacement /= sqrt(totalEnergy);\n"
+    "    }\n"
+    "\n"
+    "    float d = displacement * iContrast;\n"
+    "    vec3 color;\n"
+    "\n"
+    "    if (iColorMode == 0) {\n"
+    "        float energy = tanh(abs(d));\n"
+    "        color = plasma(energy);\n"
+    "    } else if (iColorMode == 1) {\n"
+    "        float energy = tanh(abs(d));\n"
+    "        color = magma(energy);\n"
+    "    } else if (iColorMode == 2) {\n"
+    "        float energy = tanh(abs(d));\n"
+    "        color = turbo(energy);\n"
+    "    } else if (iColorMode == 3) {\n"
+    "        float energy = tanh(abs(d));\n"
+    "        color = viridis(energy);\n"
+    "    } else {\n"
+    "        float signed_d = tanh(d);\n"
+    "        color = diverging(signed_d);\n"
+    "    }\n"
+    "\n"
+    "    outColor = vec4(color, 1.0);\n"
     "}\n";
 
 /* ============================================================================
@@ -553,14 +818,37 @@ static float *AudioGetData(AudioCapture *a) {
  * Visualizer
  * ============================================================================ */
 
+/* Default values matching Python version */
+#define DEFAULT_BASE_FREQ    40.0f
+#define DEFAULT_MODE_SCALE   0.5f
+#define DEFAULT_MAX_FREQ     7000.0f
+#define DEFAULT_CONTRAST     1.0f
+#define DEFAULT_COLOR_MODE   4
+#define DEFAULT_BOUNDARY     0
+#define DEFAULT_ASPECT_MODE  2
+#define DEFAULT_FFT_SIZE     8192
+
+#define NUM_COLOR_MODES      5
+#define NUM_BOUNDARIES       8
+#define NUM_ASPECT_MODES     3
+
+static const char *COLOR_NAMES[] = {"Plasma", "Magma", "Turbo", "Viridis", "Signed"};
+static const char *BOUNDARY_NAMES[] = {
+    "Chladni", "Clamped", "Free", "SS-Free",
+    "Clamped-SS", "Clamped-Free", "Cantilever", "Guided"
+};
+static const char *ASPECT_NAMES[] = {"Full", "1:1 Letterbox", "1:1 Crop"};
+
 typedef struct {
     int w, h;
-    float fundamental;
-    float complexity;
+    float baseFreq;
+    float modeScale;
     float maxFreq;
-    float threshold;
+    float contrast;
     int colorMode;
-    float smoothHue;
+    int boundary;
+    int aspectMode;
+    float time;
 
     GLuint program;
     GLuint vao;
@@ -569,14 +857,16 @@ typedef struct {
 
     GLint locResolution;
     GLint locSpectrum;
-    GLint locFundamental;
-    GLint locFreqPerBin;
     GLint locNumBins;
-    GLint locComplexity;
+    GLint locFreqPerBin;
     GLint locMaxFreq;
-    GLint locDominantHue;
+    GLint locBaseFreq;
+    GLint locModeScale;
+    GLint locContrast;
     GLint locColorMode;
-    GLint locThreshold;
+    GLint locTime;
+    GLint locBoundary;
+    GLint locAspectMode;
 } Visualizer;
 
 static Visualizer g_viz;
@@ -597,15 +887,21 @@ static GLuint CompileShader(GLenum type, const char *source) {
     return shader;
 }
 
+static void VizResetDefaults(Visualizer *v) {
+    v->baseFreq = DEFAULT_BASE_FREQ;
+    v->modeScale = DEFAULT_MODE_SCALE;
+    v->maxFreq = DEFAULT_MAX_FREQ;
+    v->contrast = DEFAULT_CONTRAST;
+    v->colorMode = DEFAULT_COLOR_MODE;
+    v->boundary = DEFAULT_BOUNDARY;
+    v->aspectMode = DEFAULT_ASPECT_MODE;
+}
+
 static BOOL VizInit(Visualizer *v, int w, int h) {
     v->w = w;
     v->h = h;
-    v->fundamental = 100.0f;
-    v->complexity = 0.4f;
-    v->maxFreq = 1100.0f;
-    v->threshold = 0.1f;
-    v->colorMode = 0;
-    v->smoothHue = 0.0f;
+    v->time = 0.0f;
+    VizResetDefaults(v);
 
     GLuint vs = CompileShader(GL_VERTEX_SHADER, VERTEX_SHADER_SRC);
     GLuint fs = CompileShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
@@ -656,14 +952,16 @@ static BOOL VizInit(Visualizer *v, int w, int h) {
 
     v->locResolution = glGetUniformLocation(v->program, "iResolution");
     v->locSpectrum = glGetUniformLocation(v->program, "iSpectrum");
-    v->locFundamental = glGetUniformLocation(v->program, "iFundamental");
-    v->locFreqPerBin = glGetUniformLocation(v->program, "iFreqPerBin");
     v->locNumBins = glGetUniformLocation(v->program, "iNumBins");
-    v->locComplexity = glGetUniformLocation(v->program, "iComplexity");
+    v->locFreqPerBin = glGetUniformLocation(v->program, "iFreqPerBin");
     v->locMaxFreq = glGetUniformLocation(v->program, "iMaxFreq");
-    v->locDominantHue = glGetUniformLocation(v->program, "iDominantHue");
+    v->locBaseFreq = glGetUniformLocation(v->program, "iBaseFreq");
+    v->locModeScale = glGetUniformLocation(v->program, "iModeScale");
+    v->locContrast = glGetUniformLocation(v->program, "iContrast");
     v->locColorMode = glGetUniformLocation(v->program, "iColorMode");
-    v->locThreshold = glGetUniformLocation(v->program, "iThreshold");
+    v->locTime = glGetUniformLocation(v->program, "iTime");
+    v->locBoundary = glGetUniformLocation(v->program, "iBoundary");
+    v->locAspectMode = glGetUniformLocation(v->program, "iAspectMode");
 
     return TRUE;
 }
@@ -671,25 +969,6 @@ static BOOL VizInit(Visualizer *v, int w, int h) {
 static void VizRender(Visualizer *v, float *spectrum, int fftSize) {
     int nBins = fftSize / 2 + 1;
     float freqPerBin = (float)SAMPLE_RATE / fftSize;
-
-    /* Compute dominant hue */
-    int maxBin = (int)(v->maxFreq / freqPerBin);
-    if (maxBin > nBins) maxBin = nBins;
-
-    float totalAmp = 0.0f;
-    float weightedFreq = 0.0f;
-    for (int i = 1; i < maxBin; i++) {
-        float freq = i * freqPerBin;
-        float amp = spectrum[i];
-        totalAmp += amp;
-        weightedFreq += freq * amp;
-    }
-
-    float avgFreq = weightedFreq / (totalAmp + 1e-6f);
-    float targetHue = 0.8f * avgFreq / v->maxFreq;
-    if (targetHue < 0.0f) targetHue = 0.0f;
-    if (targetHue > 0.8f) targetHue = 0.8f;
-    v->smoothHue = v->smoothHue * 0.85f + targetHue * 0.15f;
 
     /* Update spectrum buffer */
     glBindBuffer(GL_TEXTURE_BUFFER, v->spectrumTbo);
@@ -699,14 +978,16 @@ static void VizRender(Visualizer *v, float *spectrum, int fftSize) {
     glUseProgram(v->program);
 
     glUniform2f(v->locResolution, (float)v->w, (float)v->h);
-    glUniform1f(v->locFundamental, v->fundamental);
-    glUniform1f(v->locFreqPerBin, freqPerBin);
     glUniform1i(v->locNumBins, nBins);
-    glUniform1f(v->locComplexity, v->complexity);
+    glUniform1f(v->locFreqPerBin, freqPerBin);
     glUniform1f(v->locMaxFreq, v->maxFreq);
-    glUniform1f(v->locDominantHue, v->smoothHue);
+    glUniform1f(v->locBaseFreq, v->baseFreq);
+    glUniform1f(v->locModeScale, v->modeScale);
+    glUniform1f(v->locContrast, v->contrast);
     glUniform1i(v->locColorMode, v->colorMode);
-    glUniform1f(v->locThreshold, v->threshold);
+    glUniform1f(v->locTime, v->time);
+    glUniform1i(v->locBoundary, v->boundary);
+    glUniform1i(v->locAspectMode, v->aspectMode);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_BUFFER, v->spectrumTex);
@@ -714,12 +995,17 @@ static void VizRender(Visualizer *v, float *spectrum, int fftSize) {
 
     glBindVertexArray(v->vao);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+
+    v->time += 0.016f;
 }
 
 static void PrintStatus(Visualizer *v, int fftSize) {
-    int nBins = fftSize / 2 + 1;
-    printf("\rF=%.1fHz  C=%.2f  MaxF=%.0fHz  T=%.2f  FFT=%d (%d bins)                    ",
-           v->fundamental, v->complexity, v->maxFreq, v->threshold, fftSize, nBins);
+    char status[256];
+    snprintf(status, sizeof(status),
+             "Base=%.0fHz  Scale=%.2f  MaxF=%.0fHz  Contrast=%.1f  Color=%s  Boundary=%s  Aspect=%s  FFT=%d",
+             v->baseFreq, v->modeScale, v->maxFreq, v->contrast,
+             COLOR_NAMES[v->colorMode], BOUNDARY_NAMES[v->boundary], ASPECT_NAMES[v->aspectMode], fftSize);
+    printf("\r%-140s", status);
     fflush(stdout);
 }
 
@@ -886,7 +1172,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (!AudioInit(&g_audio, 4096)) {
+    if (!AudioInit(&g_audio, DEFAULT_FFT_SIZE)) {
         printf("Failed to initialize audio capture\n");
         DestroyOpenGLContext();
         return 1;
@@ -894,19 +1180,16 @@ int main(int argc, char *argv[]) {
 
     Sleep(50);
 
-    printf("\nControls:\n");
-    printf("  UP/DOWN     = fundamental +/-2%%    PGUP/PGDN = fundamental +/-10%%\n");
-    printf("  W/S         = complexity +/-0.01   A/D       = max freq +/-500 Hz\n");
-    printf("  Q/E         = threshold +/-0.01    LEFT/RIGHT = halve/double FFT\n");
-    printf("  C           = toggle color/B&W     ALT+ENTER  = toggle fullscreen\n");
-    printf("  ESC         = quit\n\n");
+    printf("Wave Plate Visualizer - Steady-state plate vibration from audio FFT\n");
+    printf("Controls: UP/DOWN=base freq  W/S=scale  A/D=max freq  Z/X=contrast  LEFT/RIGHT=FFT size  V=color  P=boundary  R=aspect  ALT+ENTER=fullscreen  SPACE=reset  ESC=quit\n\n");
 
     PrintStatus(&g_viz, g_audio.fftSize);
 
     BOOL running = TRUE;
     DWORD lastKeyTime = 0;
-    DWORD repeatDelay = 150;
-    BOOL prevLeft = FALSE, prevRight = FALSE, prevC = FALSE;
+    DWORD repeatDelay = 100;
+    BOOL prevLeft = FALSE, prevRight = FALSE;
+    BOOL prevV = FALSE, prevP = FALSE, prevR = FALSE, prevSpace = FALSE;
     BOOL prevAltEnter = FALSE;
 
     while (running) {
@@ -944,42 +1227,30 @@ int main(int argc, char *argv[]) {
             }
             prevAltEnter = currAltEnter;
 
-            /* Fundamental frequency */
+            /* Base frequency */
             if ((GetAsyncKeyState(VK_UP) & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
-                g_viz.fundamental *= 1.02f;
-                if (g_viz.fundamental > 10000.0f) g_viz.fundamental = 10000.0f;
+                g_viz.baseFreq += 5.0f;
+                if (g_viz.baseFreq > 500.0f) g_viz.baseFreq = 500.0f;
                 needUpdate = TRUE;
                 lastKeyTime = now;
             }
             if ((GetAsyncKeyState(VK_DOWN) & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
-                g_viz.fundamental /= 1.02f;
-                if (g_viz.fundamental < 1.0f) g_viz.fundamental = 1.0f;
-                needUpdate = TRUE;
-                lastKeyTime = now;
-            }
-            if ((GetAsyncKeyState(VK_PRIOR) & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
-                g_viz.fundamental *= 1.1f;
-                if (g_viz.fundamental > 10000.0f) g_viz.fundamental = 10000.0f;
-                needUpdate = TRUE;
-                lastKeyTime = now;
-            }
-            if ((GetAsyncKeyState(VK_NEXT) & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
-                g_viz.fundamental /= 1.1f;
-                if (g_viz.fundamental < 1.0f) g_viz.fundamental = 1.0f;
+                g_viz.baseFreq -= 5.0f;
+                if (g_viz.baseFreq < 10.0f) g_viz.baseFreq = 10.0f;
                 needUpdate = TRUE;
                 lastKeyTime = now;
             }
 
-            /* Complexity */
+            /* Mode scale */
             if ((GetAsyncKeyState('W') & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
-                g_viz.complexity += 0.01f;
-                if (g_viz.complexity > 1.0f) g_viz.complexity = 1.0f;
+                g_viz.modeScale += 0.05f;
+                if (g_viz.modeScale > 2.0f) g_viz.modeScale = 2.0f;
                 needUpdate = TRUE;
                 lastKeyTime = now;
             }
             if ((GetAsyncKeyState('S') & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
-                g_viz.complexity -= 0.01f;
-                if (g_viz.complexity < 0.01f) g_viz.complexity = 0.01f;
+                g_viz.modeScale -= 0.05f;
+                if (g_viz.modeScale < 0.1f) g_viz.modeScale = 0.1f;
                 needUpdate = TRUE;
                 lastKeyTime = now;
             }
@@ -993,21 +1264,21 @@ int main(int argc, char *argv[]) {
             }
             if ((GetAsyncKeyState('A') & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
                 g_viz.maxFreq -= 500.0f;
-                if (g_viz.maxFreq < 100.0f) g_viz.maxFreq = 100.0f;
+                if (g_viz.maxFreq < 500.0f) g_viz.maxFreq = 500.0f;
                 needUpdate = TRUE;
                 lastKeyTime = now;
             }
 
-            /* Threshold */
-            if ((GetAsyncKeyState('E') & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
-                g_viz.threshold += 0.01f;
-                if (g_viz.threshold > 1.0f) g_viz.threshold = 1.0f;
+            /* Contrast */
+            if ((GetAsyncKeyState('X') & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
+                g_viz.contrast += 0.1f;
+                if (g_viz.contrast > 5.0f) g_viz.contrast = 5.0f;
                 needUpdate = TRUE;
                 lastKeyTime = now;
             }
-            if ((GetAsyncKeyState('Q') & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
-                g_viz.threshold -= 0.01f;
-                if (g_viz.threshold < 0.01f) g_viz.threshold = 0.01f;
+            if ((GetAsyncKeyState('Z') & 0x8000) && (now - lastKeyTime >= repeatDelay)) {
+                g_viz.contrast -= 0.1f;
+                if (g_viz.contrast < 0.1f) g_viz.contrast = 0.1f;
                 needUpdate = TRUE;
                 lastKeyTime = now;
             }
@@ -1027,20 +1298,44 @@ int main(int argc, char *argv[]) {
             prevLeft = currLeft;
 
             /* Color mode toggle (edge-triggered) */
-            BOOL currC = (GetAsyncKeyState('C') & 0x8000) != 0;
-            if (currC && !prevC) {
-                g_viz.colorMode = 1 - g_viz.colorMode;
+            BOOL currV = (GetAsyncKeyState('V') & 0x8000) != 0;
+            if (currV && !prevV) {
+                g_viz.colorMode = (g_viz.colorMode + 1) % NUM_COLOR_MODES;
+                needUpdate = TRUE;
             }
-            prevC = currC;
+            prevV = currV;
 
-            if (needUpdate) {
-                PrintStatus(&g_viz, g_audio.fftSize);
+            /* Boundary mode toggle (edge-triggered) */
+            BOOL currP = (GetAsyncKeyState('P') & 0x8000) != 0;
+            if (currP && !prevP) {
+                g_viz.boundary = (g_viz.boundary + 1) % NUM_BOUNDARIES;
+                needUpdate = TRUE;
             }
+            prevP = currP;
+
+            /* Aspect mode toggle (edge-triggered) */
+            BOOL currR = (GetAsyncKeyState('R') & 0x8000) != 0;
+            if (currR && !prevR) {
+                g_viz.aspectMode = (g_viz.aspectMode + 1) % NUM_ASPECT_MODES;
+                needUpdate = TRUE;
+            }
+            prevR = currR;
+
+            /* Reset to defaults (edge-triggered) */
+            BOOL currSpace = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+            if (currSpace && !prevSpace) {
+                VizResetDefaults(&g_viz);
+                AudioSetFFTSize(&g_audio, DEFAULT_FFT_SIZE);
+            }
+            prevSpace = currSpace;
         } else {
             /* Reset edge-trigger states when not focused */
             prevRight = FALSE;
             prevLeft = FALSE;
-            prevC = FALSE;
+            prevV = FALSE;
+            prevP = FALSE;
+            prevR = FALSE;
+            prevSpace = FALSE;
             prevAltEnter = FALSE;
         }
 
@@ -1066,6 +1361,7 @@ int main(int argc, char *argv[]) {
             if (spectrum) {
                 VizRender(&g_viz, spectrum, g_audio.fftSize);
                 SwapBuffers(g_hdc);
+                PrintStatus(&g_viz, g_audio.fftSize);
             }
         } else {
             Sleep(16);
