@@ -4,7 +4,7 @@ Real-time audio visualizations using standing wave patterns. Captures system aud
 
 ## Shells
 
-https://github.com/user-attachments/assets/291c55bc-6e10-4f02-9861-bfd1dcbd1991
+https://github.com/user-attachments/assets/3be86dd1-3e69-47ee-b527-40f5951cfbf8
 
 CQT (Constant-Q Transform) visualizer using standing wave synthesis with mirror symmetry and water surface rendering.
 
