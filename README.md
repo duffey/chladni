@@ -2,9 +2,9 @@
 
 Real-time audio visualizations using standing wave patterns. Captures system audio and displays animated patterns.
 
-https://github.com/user-attachments/assets/fb3283ac-f653-423b-ba8d-fff5429fce13
-
 ## Shells
+
+https://github.com/user-attachments/assets/291c55bc-6e10-4f02-9861-bfd1dcbd1991
 
 Constant-Q spectral shell visualizer using standing wave synthesis with mirror symmetry.
 
